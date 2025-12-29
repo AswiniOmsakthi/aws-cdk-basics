@@ -30,7 +30,7 @@ class AwsinfraCdkPythonStack(Stack):
                     'build': {
                         'commands': [
                             'echo "Starting build process..."',
-                            'echo "Hello, World! Updated at $(date)" >> hello.txt',
+                            'echo "Hello, AswiniOmsakthi! Updated at $(date)" >> hello.txt',
                             'echo "Current content of hello.txt:"',
                             'cat hello.txt'
                         ]

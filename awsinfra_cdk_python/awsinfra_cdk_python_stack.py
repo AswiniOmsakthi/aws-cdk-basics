@@ -57,7 +57,7 @@ class AwsinfraCdkPythonStack(Stack):
             action_name='GitHub_Source',
             owner='AswiniOmsakthi',  # Replace with your GitHub username
             repo='aws-cdk-basics',  # Replace with your repository name
-            branch='main',
+            branch='master',
             oauth_token=SecretValue.secrets_manager('github-token-cdk'),
             output=source_output
         )

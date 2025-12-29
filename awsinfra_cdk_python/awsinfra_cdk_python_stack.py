@@ -16,18 +16,16 @@ class AwsinfraCdkPythonStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
-        # -------------------------------
-        # CREATE NEW VPC HERE
-        # -------------------------------
-        vpc = ec2.Vpc(self, "MyVpc",
-            max_azs=2
-        )
+        # --------------------------------------------
+        # Import existing default VPC
+        # --------------------------------------------
+        vpc = ec2.Vpc.from_lookup(self, "DefaultVPC", is_default=True)
 
         subnet_ids = [subnet.subnet_id for subnet in vpc.public_subnets]
 
-        # -------------------------------
-        # IAM ROLE (Existing)
-        # -------------------------------
+        # --------------------------------------------
+        # IAM Role
+        # --------------------------------------------
         sagemaker_exec_role = iam.Role.from_role_arn(
             self,
             "ExistingSageMakerRole",
@@ -35,14 +33,14 @@ class AwsinfraCdkPythonStack(Stack):
             mutable=False
         )
 
-        # -------------------------------
-        # S3 BUCKET
-        # -------------------------------
+        # --------------------------------------------
+        # S3 Bucket
+        # --------------------------------------------
         s3.Bucket(self, "InfraBucket")
 
-        # -------------------------------
-        # SAGEMAKER STUDIO DOMAIN
-        # -------------------------------
+        # --------------------------------------------
+        # SageMaker Studio Domain
+        # --------------------------------------------
         sagemaker.CfnDomain(
             self,
             "SageMakerDomain",
@@ -55,16 +53,15 @@ class AwsinfraCdkPythonStack(Stack):
             )
         )
 
-        # -------------------------------
-        # CODEPIPELINE
-        # -------------------------------
+        # --------------------------------------------
+        # CI/CD Pipeline
+        # --------------------------------------------
         pipeline = codepipeline.Pipeline(
             self,
             "InfraPipeline",
             pipeline_name="InfraPipeline"
         )
 
-        # Source Stage
         source_output = codepipeline.Artifact()
         pipeline.add_stage(
             stage_name="Source",
@@ -80,11 +77,10 @@ class AwsinfraCdkPythonStack(Stack):
             ]
         )
 
-        # Build Stage
         build_output = codepipeline.Artifact()
         build_project = codebuild.PipelineProject(
             self,
-            "CDKBuildProject",
+            "CDK_Build_Project",
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.STANDARD_7_0
             ),
@@ -120,7 +116,6 @@ class AwsinfraCdkPythonStack(Stack):
             ]
         )
 
-        # Deploy Stage
         pipeline.add_stage(
             stage_name="Deploy",
             actions=[

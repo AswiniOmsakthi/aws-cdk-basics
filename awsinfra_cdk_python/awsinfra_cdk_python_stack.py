@@ -1,7 +1,6 @@
 from aws_cdk import (
     Stack,
     SecretValue,
-    aws_ec2 as ec2,
     aws_iam as iam,
     aws_s3 as s3,
     aws_sagemaker as sagemaker,
@@ -11,71 +10,77 @@ from aws_cdk import (
 )
 from constructs import Construct
 
+
 class AwsinfraCdkPythonStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
-        # ==========================
-        # 1) Networking — Create VPC
-        # ==========================
-        vpc = ec2.Vpc(self, "InfraVPC", max_azs=2)
-
-        # ==========================
-        # 2) Use Your Existing IAM Role for SageMaker
-        # ==========================
+        # ==================================================
+        # 1) Use Existing IAM Role for SageMaker
+        # ==================================================
         sagemaker_exec_role = iam.Role.from_role_arn(
-            self, "ExistingSageMakerRole",
+            self,
+            "ExistingSageMakerRole",
             role_arn="arn:aws:iam::257949588515:role/cdk-basic",
-            mutable=False  # CDK will not try to modify it
+            mutable=False
         )
 
-        # (Optional) You may still need to attach policies to this role in IAM Console
-        # to allow SageMaker access to required resources like S3, CloudWatch, etc.
+        # ==================================================
+        # 2) Create S3 Bucket
+        # ==================================================
+        bucket = s3.Bucket(
+            self,
+            "InfraBucket"
+        )
 
-        # ==========================
-        # 3) Create S3 Bucket
-        # ==========================
-        bucket = s3.Bucket(self, "InfraBucket")
-
-        # ==========================
-        # 4) Create SageMaker Studio Domain
-        # ==========================
+        # ==================================================
+        # 3) Create SageMaker Studio Domain (NO VPC)
+        # ==================================================
         sm_domain = sagemaker.CfnDomain(
-            self, "SageMakerDomain",
+            self,
+            "SageMakerDomain",
             auth_mode="IAM",
             domain_name="my-sagemaker-domain",
-            vpc_id=vpc.vpc_id,
-            subnet_ids=[subnet.subnet_id for subnet in vpc.private_subnets],
             default_user_settings=sagemaker.CfnDomain.UserSettingsProperty(
                 execution_role=sagemaker_exec_role.role_arn
             )
         )
 
-        # ==========================
-        # 5) CI/CD Pipeline Definition
-        # ==========================
-
+        # ==================================================
+        # 4) CI/CD Pipeline
+        # ==================================================
         pipeline = codepipeline.Pipeline(
-            self, "InfraPipeline",
+            self,
+            "InfraPipeline",
             pipeline_name="InfraPipeline"
         )
 
-        # --- Source Stage (GitHub) ---
+        # -------------------
+        # Source Stage
+        # -------------------
         source_output = codepipeline.Artifact()
+
         source_action = cp_actions.GitHubSourceAction(
             action_name="GitHub_Source",
-            owner="AswiniOmsakthi",  # YOUR GitHub username
-            repo="aws-cdk-basics",   # YOUR GitHub repo name
-            branch="master",         # or "main"
+            owner="AswiniOmsakthi",
+            repo="aws-cdk-basics",
+            branch="master",  # or "main"
             oauth_token=SecretValue.secrets_manager("github-token-cdk"),
             output=source_output
         )
-        pipeline.add_stage(stage_name="Source", actions=[source_action])
 
-        # --- Build Stage (CodeBuild running CDK synth) ---
+        pipeline.add_stage(
+            stage_name="Source",
+            actions=[source_action]
+        )
+
+        # -------------------
+        # Build Stage
+        # -------------------
         build_project = codebuild.PipelineProject(
-            self, "CDK_Build_Project",
+            self,
+            "CDK_Build_Project",
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.STANDARD_7_0
             ),
@@ -102,19 +107,32 @@ class AwsinfraCdkPythonStack(Stack):
         )
 
         build_output = codepipeline.Artifact()
+
         build_action = cp_actions.CodeBuildAction(
             action_name="CDK_Synth",
             project=build_project,
             input=source_output,
             outputs=[build_output]
         )
-        pipeline.add_stage(stage_name="Build", actions=[build_action])
 
-        # --- Deploy Stage (CloudFormation deploy) ---
+        pipeline.add_stage(
+            stage_name="Build",
+            actions=[build_action]
+        )
+
+        # -------------------
+        # Deploy Stage
+        # -------------------
         deploy_action = cp_actions.CloudFormationCreateUpdateStackAction(
             action_name="CFN_Deploy",
             stack_name="AppInfraStack",
-            template_path=build_output.at_path("AwsinfraCdkPythonStack.template.json"),
+            template_path=build_output.at_path(
+                "AwsinfraCdkPythonStack.template.json"
+            ),
             admin_permissions=True
         )
-        pipeline.add_stage(stage_name="Deploy", actions=[deploy_action])
+
+        pipeline.add_stage(
+            stage_name="Deploy",
+            actions=[deploy_action]
+        )

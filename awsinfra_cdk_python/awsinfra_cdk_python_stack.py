@@ -10,36 +10,30 @@ from aws_cdk import (
 )
 from constructs import Construct
 
-
 class AwsinfraCdkPythonStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
-        # ==================================================
-        # 1) Use Existing IAM Role for SageMaker
-        # ==================================================
+        # --------------------------------------------------
+        # 1) Use Your Existing IAM Role for SageMaker Studio
+        # --------------------------------------------------
         sagemaker_exec_role = iam.Role.from_role_arn(
-            self,
-            "ExistingSageMakerRole",
+            self, "ExistingSageMakerRole",
             role_arn="arn:aws:iam::257949588515:role/cdk-basic",
             mutable=False
         )
 
-        # ==================================================
-        # 2) Create S3 Bucket
-        # ==================================================
-        bucket = s3.Bucket(
-            self,
-            "InfraBucket"
-        )
+        # --------------------------------------------------
+        # 2) Create an S3 Bucket
+        # --------------------------------------------------
+        bucket = s3.Bucket(self, "InfraBucket")
 
-        # ==================================================
-        # 3) Create SageMaker Studio Domain (NO VPC)
-        # ==================================================
+        # --------------------------------------------------
+        # 3) SageMaker Studio Domain (PublicInternetOnly)
+        # --------------------------------------------------
         sm_domain = sagemaker.CfnDomain(
-            self,
-            "SageMakerDomain",
+            self, "SageMakerDomain",
             auth_mode="IAM",
             domain_name="my-sagemaker-domain",
             default_user_settings=sagemaker.CfnDomain.UserSettingsProperty(
@@ -47,25 +41,22 @@ class AwsinfraCdkPythonStack(Stack):
             )
         )
 
-        # ==================================================
-        # 4) CI/CD Pipeline
-        # ==================================================
+        # --------------------------------------------------
+        # 4) CI/CD Pipeline Definition
+        # --------------------------------------------------
         pipeline = codepipeline.Pipeline(
-            self,
-            "InfraPipeline",
+            self, "InfraPipeline",
             pipeline_name="InfraPipeline"
         )
 
-        # -------------------
-        # Source Stage
-        # -------------------
+        # --- Source Stage (GitHub) ---
         source_output = codepipeline.Artifact()
 
         source_action = cp_actions.GitHubSourceAction(
             action_name="GitHub_Source",
-            owner="AswiniOmsakthi",
-            repo="aws-cdk-basics",
-            branch="master",  # or "main"
+            owner="AswiniOmsakthi",  # YOUR GitHub username
+            repo="aws-cdk-basics",   # YOUR GitHub repo name
+            branch="master",         # or "main"
             oauth_token=SecretValue.secrets_manager("github-token-cdk"),
             output=source_output
         )
@@ -75,12 +66,11 @@ class AwsinfraCdkPythonStack(Stack):
             actions=[source_action]
         )
 
-        # -------------------
-        # Build Stage
-        # -------------------
+        # --- Build Stage (CodeBuild running CDK synth) ---
+        build_output = codepipeline.Artifact()
+
         build_project = codebuild.PipelineProject(
-            self,
-            "CDK_Build_Project",
+            self, "CDK_Build_Project",
             environment=codebuild.BuildEnvironment(
                 build_image=codebuild.LinuxBuildImage.STANDARD_7_0
             ),
@@ -106,8 +96,6 @@ class AwsinfraCdkPythonStack(Stack):
             })
         )
 
-        build_output = codepipeline.Artifact()
-
         build_action = cp_actions.CodeBuildAction(
             action_name="CDK_Synth",
             project=build_project,
@@ -120,15 +108,11 @@ class AwsinfraCdkPythonStack(Stack):
             actions=[build_action]
         )
 
-        # -------------------
-        # Deploy Stage
-        # -------------------
+        # --- Deploy Stage (CloudFormation deploy) ---
         deploy_action = cp_actions.CloudFormationCreateUpdateStackAction(
             action_name="CFN_Deploy",
             stack_name="AppInfraStack",
-            template_path=build_output.at_path(
-                "AwsinfraCdkPythonStack.template.json"
-            ),
+            template_path=build_output.at_path("AwsinfraCdkPythonStack.template.json"),
             admin_permissions=True
         )
 

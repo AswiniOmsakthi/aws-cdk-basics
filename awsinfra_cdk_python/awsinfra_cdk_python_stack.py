@@ -10,11 +10,14 @@ from aws_cdk import (
     aws_codepipeline_actions as cp_actions
 )
 from constructs import Construct
+import time
 
 class AwsinfraCdkPythonStack(Stack):
 
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
+
+        timestamp = int(time.time())
 
         # Import existing default VPC
         vpc = ec2.Vpc.from_lookup(self, "DefaultVPC", is_default=True)
@@ -72,19 +75,19 @@ class AwsinfraCdkPythonStack(Stack):
             mutable=False
         )
 
-        # S3 Bucket
+        # S3 Bucket with unique name
         s3.Bucket(
             self,
             "InfraBucket",
-            bucket_name=f"infra-bucket-{self.account}-{self.region}",
+            bucket_name=f"infra-bucket-{self.account}-{self.region}-{timestamp}",
             versioned=True
         )
 
-        # SageMaker Studio Domain
+        # SageMaker Studio Domain with unique name
         sagemaker.CfnDomain(
             self,
             "SageMakerDomain",
-            domain_name=f"sagemaker-domain-{self.account}",
+            domain_name=f"sagemaker-domain-{timestamp}",
             auth_mode="IAM",
             vpc_id=vpc.vpc_id,
             subnet_ids=subnet_ids,
@@ -172,13 +175,7 @@ class AwsinfraCdkPythonStack(Stack):
                         "AwsinfraCdkPythonStack.template.json"
                     ),
                     admin_permissions=True,
-                    role=cfn_role,
-                    extra_permissions=[
-                        iam.PolicyStatement(
-                            actions=["iam:*"],
-                            resources=["*"]
-                        )
-                    ]
+                    role=cfn_role
                 )
             ]
         )

@@ -23,6 +23,10 @@ class AwsinfraCdkPythonStack(Stack):
         vpc = ec2.Vpc.from_lookup(self, "DefaultVPC", is_default=True)
         subnet_ids = [subnet.subnet_id for subnet in vpc.public_subnets]
 
+        # ============================================
+        # PIPELINE INFRASTRUCTURE (This Stack)
+        # ============================================
+
         # IAM Role for CodeBuild
         codebuild_role = iam.Role(
             self,
@@ -36,8 +40,7 @@ class AwsinfraCdkPythonStack(Stack):
                 "sagemaker:*",
                 "s3:*",
                 "ec2:*",
-                "iam:PassRole",
-                "iam:GetRole",
+                "iam:*",
                 "logs:*",
                 "codeartifact:*",
                 "sts:AssumeRole"
@@ -45,11 +48,14 @@ class AwsinfraCdkPythonStack(Stack):
             resources=["*"]
         ))
 
-        # IAM Role for CloudFormation - with explicit trust for CodePipeline
+        # IAM Role for CloudFormation - FIX: Use CompositePrincipal
         cfn_role = iam.Role(
             self,
             "CloudFormationRole",
-            assumed_by=iam.ServicePrincipal("cloudformation.amazonaws.com")
+            assumed_by=iam.CompositePrincipal(
+                iam.ServicePrincipal("cloudformation.amazonaws.com"),
+                iam.ServicePrincipal("codepipeline.amazonaws.com")
+            )
         )
 
         cfn_role.add_to_policy(iam.PolicyStatement(
@@ -64,44 +70,6 @@ class AwsinfraCdkPythonStack(Stack):
             resources=["*"]
         ))
 
-        # IAM Role for SageMaker
-        sagemaker_exec_role = iam.Role(
-            self,
-            "SageMakerExecutionRole",
-            assumed_by=iam.ServicePrincipal("sagemaker.amazonaws.com")
-        )
-
-        sagemaker_exec_role.add_to_policy(iam.PolicyStatement(
-            actions=[
-                "sagemaker:*",
-                "s3:*",
-                "ec2:*",
-                "logs:*"
-            ],
-            resources=["*"]
-        ))
-
-        # S3 Bucket with unique name
-        s3.Bucket(
-            self,
-            "InfraBucket",
-            bucket_name=f"infra-bucket-{self.account}-{self.region}-{timestamp}",
-            versioned=True
-        )
-
-        # SageMaker Studio Domain with unique name
-        sagemaker.CfnDomain(
-            self,
-            "SageMakerDomain",
-            domain_name=f"sagemaker-domain-{timestamp}",
-            auth_mode="IAM",
-            vpc_id=vpc.vpc_id,
-            subnet_ids=subnet_ids,
-            default_user_settings=sagemaker.CfnDomain.UserSettingsProperty(
-                execution_role=sagemaker_exec_role.role_arn
-            )
-        )
-
         # CI/CD Pipeline
         pipeline = codepipeline.Pipeline(
             self,
@@ -109,13 +77,7 @@ class AwsinfraCdkPythonStack(Stack):
             pipeline_name="InfraPipeline"
         )
 
-        # CRITICAL FIX: Allow CodePipeline role to assume CloudFormation role
-        cfn_role.assume_role_policy.add_statements(
-            iam.PolicyStatement(
-                actions=["sts:AssumeRole"],
-                principals=[iam.ArnPrincipal(pipeline.role.role_arn)]
-            )
-        )
+        # REMOVED: The manual trust policy is no longer needed because CompositePrincipal handles it
 
         # Stage 1: Source
         source_output = codepipeline.Artifact()
@@ -184,12 +146,72 @@ class AwsinfraCdkPythonStack(Stack):
             actions=[
                 cp_actions.CloudFormationCreateUpdateStackAction(
                     action_name="CFN_Deploy",
-                    stack_name="AppInfraStack",
+                    stack_name="ApplicationInfraStack",
                     template_path=build_output.at_path(
-                        "AwsinfraCdkPythonStack.template.json"
+                        "ApplicationStack.template.json"
                     ),
                     admin_permissions=True,
                     role=cfn_role
                 )
             ]
+        )
+
+
+class ApplicationStack(Stack):
+    """
+    Application Infrastructure Stack
+    Deployed by CI/CD pipeline
+    """
+
+    def __init__(self, scope: Construct, construct_id: str, **kwargs):
+        super().__init__(scope, construct_id, **kwargs)
+
+        timestamp = int(time.time())
+
+        # Import existing default VPC
+        vpc = ec2.Vpc.from_lookup(self, "DefaultVPC", is_default=True)
+        subnet_ids = [subnet.subnet_id for subnet in vpc.public_subnets]
+
+        # IAM Role for SageMaker
+        sagemaker_exec_role = iam.Role(
+            self,
+            "SageMakerExecutionRole",
+            assumed_by=iam.ServicePrincipal("sagemaker.amazonaws.com")
+        )
+
+        sagemaker_exec_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "sagemaker:*",
+                "s3:*",
+                "ec2:*",
+                "logs:*"
+            ],
+            resources=["*"]
+        ))
+
+        # S3 Bucket
+        s3.Bucket(
+            self,
+            "InfraBucket",
+            bucket_name=f"infra-bucket-{self.account}-{self.region}-{timestamp}",
+            versioned=True,
+            block_public_access=s3.BlockPublicAccess(
+                block_public_acls=True,
+                block_public_policy=True,
+                ignore_public_acls=True,
+                restrict_public_buckets=True
+            )
+        )
+
+        # SageMaker Studio Domain
+        sagemaker.CfnDomain(
+            self,
+            "SageMakerDomain",
+            domain_name=f"sagemaker-domain-{timestamp}",
+            auth_mode="IAM",
+            vpc_id=vpc.vpc_id,
+            subnet_ids=subnet_ids,
+            default_user_settings=sagemaker.CfnDomain.UserSettingsProperty(
+                execution_role=sagemaker_exec_role.role_arn
+            )
         )

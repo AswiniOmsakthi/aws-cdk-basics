@@ -45,14 +45,11 @@ class AwsinfraCdkPythonStack(Stack):
             resources=["*"]
         ))
 
-        # IAM Role for CloudFormation
+        # IAM Role for CloudFormation - with explicit trust for CodePipeline
         cfn_role = iam.Role(
             self,
             "CloudFormationRole",
-            assumed_by=iam.CompositePrincipal(
-                iam.ServicePrincipal("cloudformation.amazonaws.com"),
-                iam.ServicePrincipal("codepipeline.amazonaws.com")
-            )
+            assumed_by=iam.ServicePrincipal("cloudformation.amazonaws.com")
         )
 
         cfn_role.add_to_policy(iam.PolicyStatement(
@@ -68,12 +65,21 @@ class AwsinfraCdkPythonStack(Stack):
         ))
 
         # IAM Role for SageMaker
-        sagemaker_exec_role = iam.Role.from_role_arn(
+        sagemaker_exec_role = iam.Role(
             self,
-            "ExistingSageMakerRole",
-            role_arn="arn:aws:iam::257949588515:role/cdk-basic",
-            mutable=False
+            "SageMakerExecutionRole",
+            assumed_by=iam.ServicePrincipal("sagemaker.amazonaws.com")
         )
+
+        sagemaker_exec_role.add_to_policy(iam.PolicyStatement(
+            actions=[
+                "sagemaker:*",
+                "s3:*",
+                "ec2:*",
+                "logs:*"
+            ],
+            resources=["*"]
+        ))
 
         # S3 Bucket with unique name
         s3.Bucket(
@@ -101,6 +107,14 @@ class AwsinfraCdkPythonStack(Stack):
             self,
             "InfraPipeline",
             pipeline_name="InfraPipeline"
+        )
+
+        # CRITICAL FIX: Allow CodePipeline role to assume CloudFormation role
+        cfn_role.assume_role_policy.add_statements(
+            iam.PolicyStatement(
+                actions=["sts:AssumeRole"],
+                principals=[iam.ArnPrincipal(pipeline.role.role_arn)]
+            )
         )
 
         # Stage 1: Source
